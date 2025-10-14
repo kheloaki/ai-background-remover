@@ -110,6 +110,116 @@ def remove_background_api():
         logger.error(f"Error processing image: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/remove-background-base64', methods=['POST'])
+def remove_background_base64():
+    """API endpoint for background removal with base64 input/output"""
+    try:
+        data = request.get_json()
+        if not data or 'image' not in data:
+            return jsonify({"error": "No image data provided"}), 400
+        
+        # Get parameters from request
+        model = data.get('model', 'isnet-general-use')
+        upscale = data.get('upscale', False)
+        scale_factor = float(data.get('scale_factor', 2.0))
+        upscale_method = data.get('upscale_method', 'lanczos')
+        padding = int(data.get('padding', 10))
+        white_bg = data.get('white_bg', False)
+        
+        if not bg_remover:
+            return jsonify({"error": "Background remover not available"}), 500
+        
+        # Decode base64 image
+        import base64
+        from io import BytesIO
+        from PIL import Image
+        
+        try:
+            # Remove data URL prefix if present
+            image_data = data['image']
+            if image_data.startswith('data:image'):
+                image_data = image_data.split(',')[1]
+            
+            # Decode base64
+            image_bytes = base64.b64decode(image_data)
+            image = Image.open(BytesIO(image_bytes))
+            
+            # Save temporarily
+            input_path = "temp_input.png"
+            image.save(input_path)
+            
+            try:
+                # Process the image
+                if white_bg:
+                    result_path = bg_remover.remove_background_with_white_bg(
+                        input_path,
+                        model=model,
+                        auto_crop=True,
+                        padding=padding,
+                        upscale=upscale,
+                        scale_factor=scale_factor,
+                        upscale_method=upscale_method
+                    )
+                else:
+                    result_path = bg_remover.remove_background(
+                        input_path,
+                        model=model,
+                        auto_crop=True,
+                        padding=padding,
+                        upscale=upscale,
+                        scale_factor=scale_factor,
+                        upscale_method=upscale_method
+                    )
+                
+                # Convert result to base64
+                with open(result_path, 'rb') as f:
+                    result_bytes = f.read()
+                    result_base64 = base64.b64encode(result_bytes).decode('utf-8')
+                
+                return jsonify({
+                    "success": True,
+                    "image": f"data:image/png;base64,{result_base64}",
+                    "message": "Background removed successfully"
+                })
+                
+            finally:
+                # Clean up temporary files
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+                if os.path.exists(result_path):
+                    os.remove(result_path)
+        
+        except Exception as e:
+            return jsonify({"error": f"Invalid image data: {str(e)}"}), 400
+    
+    except Exception as e:
+        logger.error(f"Error processing base64 image: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/models', methods=['GET'])
+def get_available_models():
+    """Get list of available AI models"""
+    models = [
+        {"id": "isnet-general-use", "name": "ISNet General Use", "description": "Best for general purpose background removal"},
+        {"id": "u2net", "name": "U²-Net", "description": "Good for most images"},
+        {"id": "u2netp", "name": "U²-Net+", "description": "Lightweight version of U²-Net"},
+        {"id": "u2net_human_seg", "name": "U²-Net Human Segmentation", "description": "Optimized for human subjects"},
+        {"id": "u2net_cloth_seg", "name": "U²-Net Cloth Segmentation", "description": "Optimized for clothing"},
+        {"id": "silueta", "name": "Silueta", "description": "Good for portraits and people"},
+        {"id": "isnet-anime", "name": "ISNet Anime", "description": "Optimized for anime and cartoon images"}
+    ]
+    return jsonify({"models": models})
+
+@app.route('/api/upscale-methods', methods=['GET'])
+def get_upscale_methods():
+    """Get list of available upscaling methods"""
+    methods = [
+        {"id": "lanczos", "name": "Lanczos", "description": "Fast, good quality, preserves transparency"},
+        {"id": "bicubic", "name": "Bicubic", "description": "Good quality, preserves transparency"},
+        {"id": "ai", "name": "AI Enhanced", "description": "Advanced AI upscaling with denoising and sharpening"}
+    ]
+    return jsonify({"methods": methods})
+
 @app.route('/api/batch-remove', methods=['POST'])
 def batch_remove_background():
     """API endpoint for batch background removal"""
