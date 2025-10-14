@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Background Remover</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .upload-section {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-section:hover {
+            border-color: #764ba2;
+            background: #f8f9ff;
+        }
+        
+        .upload-section.dragover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+        
+        .upload-icon {
+            font-size: 4rem;
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }
+        
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .option-group {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #e0e6ff;
+        }
+        
+        .option-group h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .form-group select,
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+        
+        .process-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 50px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-top: 20px;
+        }
+        
+        .process-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(40, 167, 69, 0.3);
+        }
+        
+        .process-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .result-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .download-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        
+        .download-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 5px 10px rgba(102, 126, 234, 0.3);
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border: 1px solid #c3e6cb;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .options {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎨 AI Background Remover</h1>
+            <p>Remove backgrounds from images with AI-powered precision</p>
+        </div>
+        
+        <div class="content">
+            <div class="upload-section" id="uploadSection">
+                <div class="upload-icon">📁</div>
+                <h3>Upload Your Images</h3>
+                <p>Drag and drop your images here or click to browse</p>
+                <input type="file" id="fileInput" class="file-input" multiple accept="image/*">
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                    Choose Files
+                </button>
+                <p id="fileInfo" style="margin-top: 15px; color: #666;"></p>
+            </div>
+            
+            <div class="options">
+                <div class="option-group">
+                    <h3>🎯 AI Model</h3>
+                    <div class="form-group">
+                        <label for="model">Model Type</label>
+                        <select id="model">
+                            <option value="isnet-general-use">ISNet General Use (Recommended)</option>
+                            <option value="u2net">U²-Net</option>
+                            <option value="u2netp">U²-Net+</option>
+                            <option value="u2net_human_seg">U²-Net Human Segmentation</option>
+                            <option value="u2net_cloth_seg">U²-Net Cloth Segmentation</option>
+                            <option value="silueta">Silueta</option>
+                            <option value="isnet-anime">ISNet Anime</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="option-group">
+                    <h3>🔧 Processing Options</h3>
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="upscale" name="upscale">
+                            <label for="upscale">Enable Upscaling</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="scaleFactor">Scale Factor</label>
+                        <input type="number" id="scaleFactor" value="2.0" min="1.0" max="5.0" step="0.5">
+                    </div>
+                    <div class="form-group">
+                        <label for="upscaleMethod">Upscale Method</label>
+                        <select id="upscaleMethod">
+                            <option value="lanczos">Lanczos (Fast)</option>
+                            <option value="bicubic">Bicubic</option>
+                            <option value="ai">AI Enhanced</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="option-group">
+                    <h3>🎨 Background Options</h3>
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="whiteBg" name="whiteBg">
+                            <label for="whiteBg">White Background</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="padding">Padding (pixels)</label>
+                        <input type="number" id="padding" value="10" min="0" max="50">
+                    </div>
+                </div>
+            </div>
+            
+            <button class="process-btn" id="processBtn" onclick="processImages()">
+                🚀 Process Images
+            </button>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Processing your images...</p>
+            </div>
+            
+            <div class="results" id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const uploadSection = document.getElementById('uploadSection');
+        const fileInfo = document.getElementById('fileInfo');
+        const processBtn = document.getElementById('processBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        
+        let selectedFiles = [];
+        
+        // File input change
+        fileInput.addEventListener('change', function(e) {
+            selectedFiles = Array.from(e.target.files);
+            updateFileInfo();
+        });
+        
+        // Drag and drop
+        uploadSection.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadSection.classList.add('dragover');
+        });
+        
+        uploadSection.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+        });
+        
+        uploadSection.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+            selectedFiles = Array.from(e.dataTransfer.files);
+            fileInput.files = e.dataTransfer.files;
+            updateFileInfo();
+        });
+        
+        function updateFileInfo() {
+            if (selectedFiles.length > 0) {
+                const fileNames = selectedFiles.map(f => f.name).join(', ');
+                fileInfo.textContent = `Selected: ${fileNames}`;
+                fileInfo.style.color = '#28a745';
+            } else {
+                fileInfo.textContent = '';
+            }
+        }
+        
+        async function processImages() {
+            if (selectedFiles.length === 0) {
+                alert('Please select at least one image file.');
+                return;
+            }
+            
+            processBtn.disabled = true;
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            
+            try {
+                const formData = new FormData();
+                
+                // Add files
+                selectedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+                
+                // Add options
+                formData.append('model', document.getElementById('model').value);
+                formData.append('upscale', document.getElementById('upscale').checked);
+                formData.append('scale_factor', document.getElementById('scaleFactor').value);
+                formData.append('upscale_method', document.getElementById('upscaleMethod').value);
+                formData.append('padding', document.getElementById('padding').value);
+                formData.append('white_bg', document.getElementById('whiteBg').checked);
+                
+                const response = await fetch('/api/batch-remove', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'processed_images.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    showSuccess('Images processed successfully! Download started.');
+                } else {
+                    const error = await response.json();
+                    showError(`Error: ${error.error}`);
+                }
+            } catch (error) {
+                showError(`Network error: ${error.message}`);
+            } finally {
+                processBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+        
+        function showSuccess(message) {
+            results.innerHTML = `<div class="success">${message}</div>`;
+            results.style.display = 'block';
+        }
+        
+        function showError(message) {
+            results.innerHTML = `<div class="error">${message}</div>`;
+            results.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
