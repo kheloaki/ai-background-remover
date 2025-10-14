@@ -10,7 +10,7 @@ import base64
 from flask import Flask, request, jsonify, render_template, send_file
 from werkzeug.utils import secure_filename
 import logging
-from background_remover import BackgroundRemover
+from background_remover_light import LightweightBackgroundRemover
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Initialize background remover
+# Initialize lightweight background remover
 try:
-    bg_remover = BackgroundRemover()
-    logger.info("Background remover initialized successfully")
+    bg_remover = LightweightBackgroundRemover()
+    logger.info("Lightweight background remover initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize background remover: {e}")
     bg_remover = None
@@ -61,12 +61,10 @@ def remove_background_api():
             return jsonify({"error": "Background remover not available"}), 500
         
         # Get parameters from request
-        model = request.form.get('model', 'isnet-general-use')
-        upscale = request.form.get('upscale', 'false').lower() == 'true'
-        scale_factor = float(request.form.get('scale_factor', '2.0'))
-        upscale_method = request.form.get('upscale_method', 'lanczos')
+        model = request.form.get('model', 'u2net')
         padding = int(request.form.get('padding', '10'))
         white_bg = request.form.get('white_bg', 'false').lower() == 'true'
+        enhance = request.form.get('enhance', 'false').lower() == 'true'
         
         # Save uploaded file temporarily
         filename = secure_filename(file.filename)
@@ -78,23 +76,19 @@ def remove_background_api():
             if white_bg:
                 result_path = bg_remover.remove_background_with_white_bg(
                     input_path, 
-                    model=model,
                     auto_crop=True,
-                    padding=padding,
-                    upscale=upscale,
-                    scale_factor=scale_factor,
-                    upscale_method=upscale_method
+                    padding=padding
                 )
             else:
                 result_path = bg_remover.remove_background(
                     input_path,
-                    model=model,
                     auto_crop=True,
-                    padding=padding,
-                    upscale=upscale,
-                    scale_factor=scale_factor,
-                    upscale_method=upscale_method
+                    padding=padding
                 )
+            
+            # Enhance image if requested
+            if enhance:
+                bg_remover.enhance_image(result_path)
             
             # Return the processed image
             return send_file(result_path, as_attachment=True, download_name=f"processed_{filename}")
@@ -119,12 +113,10 @@ def remove_background_base64():
             return jsonify({"error": "No image data provided"}), 400
         
         # Get parameters from request
-        model = data.get('model', 'isnet-general-use')
-        upscale = data.get('upscale', False)
-        scale_factor = float(data.get('scale_factor', 2.0))
-        upscale_method = data.get('upscale_method', 'lanczos')
+        model = data.get('model', 'u2net')
         padding = int(data.get('padding', 10))
         white_bg = data.get('white_bg', False)
+        enhance = data.get('enhance', False)
         
         if not bg_remover:
             return jsonify({"error": "Background remover not available"}), 500
@@ -153,23 +145,19 @@ def remove_background_base64():
                 if white_bg:
                     result_path = bg_remover.remove_background_with_white_bg(
                         input_path,
-                        model=model,
                         auto_crop=True,
-                        padding=padding,
-                        upscale=upscale,
-                        scale_factor=scale_factor,
-                        upscale_method=upscale_method
+                        padding=padding
                     )
                 else:
                     result_path = bg_remover.remove_background(
                         input_path,
-                        model=model,
                         auto_crop=True,
-                        padding=padding,
-                        upscale=upscale,
-                        scale_factor=scale_factor,
-                        upscale_method=upscale_method
+                        padding=padding
                     )
+                
+                # Enhance image if requested
+                if enhance:
+                    bg_remover.enhance_image(result_path)
                 
                 # Convert result to base64
                 with open(result_path, 'rb') as f:
@@ -200,25 +188,24 @@ def remove_background_base64():
 def get_available_models():
     """Get list of available AI models"""
     models = [
-        {"id": "isnet-general-use", "name": "ISNet General Use", "description": "Best for general purpose background removal"},
-        {"id": "u2net", "name": "U²-Net", "description": "Good for most images"},
-        {"id": "u2netp", "name": "U²-Net+", "description": "Lightweight version of U²-Net"},
+        {"id": "u2net", "name": "U²-Net", "description": "Good for most images (recommended)"},
+        {"id": "u2netp", "name": "U²-Net+", "description": "Lightweight version of U²-Net (fastest)"},
         {"id": "u2net_human_seg", "name": "U²-Net Human Segmentation", "description": "Optimized for human subjects"},
         {"id": "u2net_cloth_seg", "name": "U²-Net Cloth Segmentation", "description": "Optimized for clothing"},
-        {"id": "silueta", "name": "Silueta", "description": "Good for portraits and people"},
-        {"id": "isnet-anime", "name": "ISNet Anime", "description": "Optimized for anime and cartoon images"}
+        {"id": "silueta", "name": "Silueta", "description": "Good for portraits and people"}
     ]
     return jsonify({"models": models})
 
-@app.route('/api/upscale-methods', methods=['GET'])
-def get_upscale_methods():
-    """Get list of available upscaling methods"""
-    methods = [
-        {"id": "lanczos", "name": "Lanczos", "description": "Fast, good quality, preserves transparency"},
-        {"id": "bicubic", "name": "Bicubic", "description": "Good quality, preserves transparency"},
-        {"id": "ai", "name": "AI Enhanced", "description": "Advanced AI upscaling with denoising and sharpening"}
+@app.route('/api/features', methods=['GET'])
+def get_available_features():
+    """Get list of available features"""
+    features = [
+        {"id": "auto_crop", "name": "Auto Crop", "description": "Automatically crop to remove empty space"},
+        {"id": "white_bg", "name": "White Background", "description": "Add white background instead of transparent"},
+        {"id": "enhance", "name": "Image Enhancement", "description": "Enhance image quality with contrast and sharpness"},
+        {"id": "padding", "name": "Padding", "description": "Add padding around the cropped subject"}
     ]
-    return jsonify({"methods": methods})
+    return jsonify({"features": features})
 
 @app.route('/api/batch-remove', methods=['POST'])
 def batch_remove_background():
@@ -235,12 +222,10 @@ def batch_remove_background():
             return jsonify({"error": "Background remover not available"}), 500
         
         # Get parameters
-        model = request.form.get('model', 'isnet-general-use')
-        upscale = request.form.get('upscale', 'false').lower() == 'true'
-        scale_factor = float(request.form.get('scale_factor', '2.0'))
-        upscale_method = request.form.get('upscale_method', 'lanczos')
+        model = request.form.get('model', 'u2net')
         padding = int(request.form.get('padding', '10'))
         white_bg = request.form.get('white_bg', 'false').lower() == 'true'
+        enhance = request.form.get('enhance', 'false').lower() == 'true'
         
         # Process all files
         results = []
@@ -258,23 +243,19 @@ def batch_remove_background():
                     if white_bg:
                         result_path = bg_remover.remove_background_with_white_bg(
                             input_path,
-                            model=model,
                             auto_crop=True,
-                            padding=padding,
-                            upscale=upscale,
-                            scale_factor=scale_factor,
-                            upscale_method=upscale_method
+                            padding=padding
                         )
                     else:
                         result_path = bg_remover.remove_background(
                             input_path,
-                            model=model,
                             auto_crop=True,
-                            padding=padding,
-                            upscale=upscale,
-                            scale_factor=scale_factor,
-                            upscale_method=upscale_method
+                            padding=padding
                         )
+                    
+                    # Enhance image if requested
+                    if enhance:
+                        bg_remover.enhance_image(result_path)
                     
                     results.append({
                         'original': filename,
