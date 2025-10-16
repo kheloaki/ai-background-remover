@@ -119,11 +119,11 @@ export default function BackgroundRemoverNextUI() {
 
   const clearItem = (id: string) => setItems((prev) => prev.filter((p) => p.id !== id));
 
-  const downloadImage = (item: ImageItem) => {
-    if (item.status !== 'done' || !item.result) return;
+  const downloadImage = (item: PreviewItem) => {
+    if (item.status !== 'done' || !item.cutoutUrl) return;
     
     const link = document.createElement('a');
-    link.href = item.result;
+    link.href = item.cutoutUrl;
     link.download = `removed_bg_${item.file.name}`;
     document.body.appendChild(link);
     link.click();
