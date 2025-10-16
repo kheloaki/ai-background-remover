@@ -1,23 +1,49 @@
-# Simple Dockerfile that just runs Python
-FROM python:3.9-slim
+# Use the official Node.js 18 image
+FROM node:18-alpine AS base
 
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# Copy frontend package files
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Rebuild the source code only when needed
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY frontend/ .
 
-COPY . .
+# Build the application
+RUN npm run build
 
-# Expose port
-EXPOSE 5000
+# Production image, copy all the files and run next
+FROM base AS runner
+WORKDIR /app
 
-# Set environment variables
-ENV PORT=5000
-ENV PYTHONUNBUFFERED=1
+ENV NODE_ENV production
 
-CMD ["python", "app.py"]
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+COPY --from=builder /app/public ./public
+
+# Set the correct permission for prerender cache
+RUN mkdir .next
+RUN chown nextjs:nodejs .next
+
+# Automatically leverage output traces to reduce image size
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 3000
+
+ENV PORT 3000
+ENV HOSTNAME "0.0.0.0"
+ENV NEXT_PUBLIC_API_BASE_URL "https://web-production-4e232.up.railway.app"
+
+CMD ["node", "server.js"]
