@@ -1,47 +1,40 @@
-# Use the official Node.js 18 image
-FROM node:18-alpine AS base
+# Multi-stage build: Build Next.js frontend, then run Flask backend
 
-# Install dependencies only when needed
-FROM base AS deps
-RUN apk add --no-cache libc6-compat
-WORKDIR /app
-
-# Copy frontend package files
-COPY frontend/package.json frontend/package-lock.json* ./
+# Stage 1: Build Next.js frontend
+FROM node:18-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
 RUN npm ci
-
-# Rebuild the source code only when needed
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY frontend/ .
-
-# Build the application
+COPY frontend/ ./
 RUN npm run build
 
-# Production image, copy all the files and run next
-FROM base AS runner
+# Stage 2: Python Flask backend
+FROM python:3.9-slim
+
 WORKDIR /app
 
-ENV NODE_ENV production
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# Copy Python requirements and install
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Set the correct permission for prerender cache
-RUN mkdir .next
-RUN chown nextjs:nodejs .next
+# Copy Flask app files
+COPY app.py background_remover_light.py ./
 
-# Automatically leverage output traces to reduce image size
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Copy built Next.js frontend from builder stage
+COPY --from=frontend-builder /app/frontend/out ./frontend/out
 
-USER nextjs
+# Create files directory
+RUN mkdir -p files
 
-EXPOSE 3000
+# Expose port
+EXPOSE 5000
 
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
-ENV NEXT_PUBLIC_API_BASE_URL "https://web-production-4e232.up.railway.app"
+ENV PORT=5000
+ENV PYTHONUNBUFFERED=1
 
-CMD ["node", "server.js"]
+CMD ["python", "app.py"]

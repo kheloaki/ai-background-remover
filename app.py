@@ -1,102 +1,106 @@
-#!/usr/bin/env python3
-"""
-Background Removal Web Service
-Deployable on Railway with web interface
-"""
-
-import os
-import io
-import base64
-from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
-from werkzeug.utils import secure_filename
-import logging
-from background_remover_light import LightweightBackgroundRemover
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
-import uuid
+from werkzeug.utils import secure_filename
+import os
+import logging
+import base64
+from io import BytesIO
+from background_remover_light import LightweightBackgroundRemover
 import requests
+from PIL import Image
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-# Allow CORS for frontend domains; during dev allow all
+app = Flask(__name__, static_folder='frontend/out', static_url_path='')
 CORS(app, resources={r"/api/*": {"origins": "*"}, r"/files/*": {"origins": "*"}})
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-OUTPUT_DIR = os.path.join(os.getcwd(), "outputs")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Initialize lightweight background remover
+# Initialize background remover
+bg_remover = None
+
 try:
     bg_remover = LightweightBackgroundRemover()
     logger.info("Lightweight background remover initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize background remover: {e}")
-    bg_remover = None
 
-# Allowed file extensions
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff'}
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def _build_file_url(filename: str) -> str:
-    base = request.host_url.rstrip('/')
-    return f"{base}/files/{filename}"
-
-def _respond_with_file(result_path: str, response_type: str, original_filename_fallback: str = "result.png"):
-    """Return result either as base64 data URL or as a served URL.
-
-    response_type: 'base64' | 'url' (default: base64)
-    """
-    response_type = (response_type or "base64").lower()
-    if response_type == "url":
-        # Persist the file to OUTPUT_DIR and return URL
-        ext = os.path.splitext(result_path)[1] or ".png"
-        out_name = f"{uuid.uuid4().hex}{ext}"
-        dest_path = os.path.join(OUTPUT_DIR, out_name)
-        try:
-            # If result already at a temp path, move/copy
-            with open(result_path, 'rb') as src, open(dest_path, 'wb') as dst:
-                dst.write(src.read())
-        except Exception as e:
-            return jsonify({"error": f"Failed to persist output: {str(e)}"}), 500
-        return jsonify({
-            "success": True,
-            "image_url": _build_file_url(out_name)
-        })
-    else:
-        # Return base64 data URL
-        try:
-            with open(result_path, 'rb') as f:
-                result_bytes = f.read()
-                result_base64 = base64.b64encode(result_bytes).decode('utf-8')
-            return jsonify({
-                "success": True,
-                "image": f"data:image/png;base64,{result_base64}",
-                "message": "Background removed successfully"
-            })
-        except Exception as e:
-            return jsonify({"error": f"Failed to encode output: {str(e)}"}), 500
-
+# Serve Next.js frontend
 @app.route('/')
-def index():
-    """Main page with upload interface"""
-    return render_template('index.html')
+def serve_frontend():
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    if os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/health')
 def health():
     """Health check endpoint"""
-    return jsonify({"status": "healthy", "service": "background-remover"})
+    return jsonify({
+        "status": "healthy",
+        "service": "background-remover"
+    })
 
-@app.route('/files/<path:filename>')
-def serve_file(filename):
-    """Serve persisted output files."""
-    return send_from_directory(OUTPUT_DIR, filename, as_attachment=False)
+@app.route('/api/models')
+def get_models():
+    """API endpoint to get available models"""
+    models = [
+        {
+            "id": "isnet-general-use",
+            "name": "ISNet General Use",
+            "description": "Best for general purpose background removal"
+        },
+        {
+            "id": "u2net",
+            "name": "U²-Net",
+            "description": "Good for most images"
+        },
+        {
+            "id": "u2netp",
+            "name": "U²-Net+",
+            "description": "Faster but less accurate"
+        },
+        {
+            "id": "u2net_human_seg",
+            "name": "U²-Net Human Segmentation",
+            "description": "Optimized for human subjects"
+        },
+        {
+            "id": "u2net_cloth_seg",
+            "name": "U²-Net Cloth Segmentation",
+            "description": "Optimized for clothing"
+        },
+        {
+            "id": "silueta",
+            "name": "Silueta",
+            "description": "Good for silhouettes"
+        },
+        {
+            "id": "isnet-anime",
+            "name": "ISNet Anime",
+            "description": "Optimized for anime/cartoon images"
+        }
+    ]
+    return jsonify({"models": models})
+
+@app.route('/api/features')
+def get_features():
+    """API endpoint to get available features"""
+    features = {
+        "upscaling": True,
+        "white_background": True,
+        "auto_crop": True,
+        "response_types": ["base64", "url"]
+    }
+    return jsonify({"features": features})
 
 @app.route('/api/remove-background', methods=['POST'])
-def remove_background_api():
-    """API endpoint for background removal"""
+def remove_background():
+    """API endpoint for background removal with file upload"""
     try:
         if 'file' not in request.files:
             return jsonify({"error": "No file provided"}), 400
@@ -105,18 +109,14 @@ def remove_background_api():
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
         
-        if not allowed_file(file.filename):
-            return jsonify({"error": "Invalid file type"}), 400
+        model = request.form.get('model', 'u2net')
+        padding = int(request.form.get('padding', 10))
+        white_bg = request.form.get('white_bg', 'false').lower() == 'true'
+        enhance = request.form.get('enhance', 'false').lower() == 'true'
+        response_type = request.form.get('response_type', 'base64')
         
         if not bg_remover:
             return jsonify({"error": "Background remover not available"}), 500
-        
-        # Get parameters from request
-        model = request.form.get('model', 'u2net')
-        padding = int(request.form.get('padding', '10'))
-        white_bg = request.form.get('white_bg', 'false').lower() == 'true'
-        enhance = request.form.get('enhance', 'false').lower() == 'true'
-        response_type = request.form.get('response_type', 'base64')  # 'base64' | 'url'
         
         # Save uploaded file temporarily
         filename = secure_filename(file.filename)
@@ -127,7 +127,7 @@ def remove_background_api():
             # Process the image
             if white_bg:
                 result_path = bg_remover.remove_background_with_white_bg(
-                    input_path, 
+                    input_path,
                     auto_crop=True,
                     padding=padding
                 )
@@ -138,18 +138,39 @@ def remove_background_api():
                     padding=padding
                 )
             
-            # Enhance image if requested
+            # Enhance if requested
             if enhance:
                 bg_remover.enhance_image(result_path)
             
-            # Return the processed image
-            return _respond_with_file(result_path, response_type, original_filename_fallback=f"processed_{filename}")
-            
+            if response_type == 'url':
+                # Move to files directory
+                output_filename = f"processed_{filename}"
+                output_path = os.path.join('files', output_filename)
+                os.makedirs('files', exist_ok=True)
+                os.rename(result_path, output_path)
+                
+                return jsonify({
+                    "success": True,
+                    "image_url": f"/files/{output_filename}",
+                    "message": "Background removed successfully"
+                })
+            else:
+                # Return base64
+                with open(result_path, 'rb') as f:
+                    result_bytes = f.read()
+                    result_base64 = base64.b64encode(result_bytes).decode('utf-8')
+                
+                return jsonify({
+                    "success": True,
+                    "image": f"data:image/png;base64,{result_base64}",
+                    "message": "Background removed successfully"
+                })
+        
         finally:
-            # Clean up temporary files
+            # Cleanup
             if os.path.exists(input_path):
                 os.remove(input_path)
-            if os.path.exists(result_path):
+            if response_type != 'url' and os.path.exists(result_path):
                 os.remove(result_path)
     
     except Exception as e:
@@ -158,43 +179,113 @@ def remove_background_api():
 
 @app.route('/api/remove-background-base64', methods=['POST'])
 def remove_background_base64():
-    """API endpoint for background removal with base64 input/output"""
+    """API endpoint for background removal with base64 input"""
     try:
         data = request.get_json()
         if not data or 'image' not in data:
             return jsonify({"error": "No image data provided"}), 400
         
-        # Get parameters from request
+        image_data = data['image']
         model = data.get('model', 'u2net')
         padding = int(data.get('padding', 10))
         white_bg = data.get('white_bg', False)
         enhance = data.get('enhance', False)
-        response_type = data.get('response_type', 'base64')  # 'base64' | 'url'
+        response_type = data.get('response_type', 'base64')
         
         if not bg_remover:
             return jsonify({"error": "Background remover not available"}), 500
         
-        # Decode base64 image
-        import base64
-        from io import BytesIO
-        from PIL import Image
+        # Decode base64
+        if image_data.startswith('data:image'):
+            image_data = image_data.split(',')[1]
+        
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(BytesIO(image_bytes))
+        
+        # Save temporarily
+        filename = "temp_base64.png"
+        input_path = f"temp_{filename}"
+        image.save(input_path)
         
         try:
-            # Remove data URL prefix if present
-            image_data = data['image']
-            if image_data.startswith('data:image'):
-                image_data = image_data.split(',')[1]
+            # Process
+            if white_bg:
+                result_path = bg_remover.remove_background_with_white_bg(
+                    input_path,
+                    auto_crop=True,
+                    padding=padding
+                )
+            else:
+                result_path = bg_remover.remove_background(
+                    input_path,
+                    auto_crop=True,
+                    padding=padding
+                )
             
-            # Decode base64
-            image_bytes = base64.b64decode(image_data)
-            image = Image.open(BytesIO(image_bytes))
+            if enhance:
+                bg_remover.enhance_image(result_path)
             
-            # Save temporarily
-            input_path = "temp_input.png"
+            if response_type == 'url':
+                output_filename = f"processed_{filename}"
+                output_path = os.path.join('files', output_filename)
+                os.makedirs('files', exist_ok=True)
+                os.rename(result_path, output_path)
+                
+                return jsonify({
+                    "success": True,
+                    "image_url": f"/files/{output_filename}",
+                    "message": "Background removed successfully"
+                })
+            else:
+                with open(result_path, 'rb') as f:
+                    result_bytes = f.read()
+                    result_base64 = base64.b64encode(result_bytes).decode('utf-8')
+                
+                return jsonify({
+                    "success": True,
+                    "image": f"data:image/png;base64,{result_base64}",
+                    "message": "Background removed successfully"
+                })
+        
+        finally:
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if response_type != 'url' and os.path.exists(result_path):
+                os.remove(result_path)
+    
+    except Exception as e:
+        logger.error(f"Error processing base64 image: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/remove-background-url', methods=['POST'])
+def remove_background_url():
+    """API endpoint for background removal with image URL input"""
+    try:
+        data = request.get_json()
+        if not data or 'url' not in data:
+            return jsonify({"error": "No image URL provided"}), 400
+
+        image_url = data['url']
+        model = data.get('model', 'u2net')
+        padding = int(data.get('padding', 10))
+        white_bg = data.get('white_bg', False)
+        enhance = data.get('enhance', False)
+        response_type = data.get('response_type', 'base64')
+
+        if not bg_remover:
+            return jsonify({"error": "Background remover not available"}), 500
+
+        # Download image
+        try:
+            response = requests.get(image_url, stream=True)
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content))
+            
+            filename = secure_filename(image_url.split('/')[-1] or "downloaded_image.png")
+            input_path = f"temp_{filename}"
             image.save(input_path)
-            
+
             try:
-                # Process the image
                 if white_bg:
                     result_path = bg_remover.remove_background_with_white_bg(
                         input_path,
@@ -208,201 +299,48 @@ def remove_background_base64():
                         padding=padding
                     )
                 
-                # Enhance image if requested
                 if enhance:
                     bg_remover.enhance_image(result_path)
-                
-                # Respond as requested
-                return _respond_with_file(result_path, response_type)
-                
+
+                if response_type == 'url':
+                    output_filename = f"processed_{filename}"
+                    output_path = os.path.join('files', output_filename)
+                    os.makedirs('files', exist_ok=True)
+                    os.rename(result_path, output_path)
+                    return jsonify({
+                        "success": True,
+                        "image_url": f"/files/{output_filename}",
+                        "message": "Background removed successfully"
+                    })
+                else:
+                    with open(result_path, 'rb') as f:
+                        result_bytes = f.read()
+                        result_base64 = base64.b64encode(result_bytes).decode('utf-8')
+                    return jsonify({
+                        "success": True,
+                        "image": f"data:image/png;base64,{result_base64}",
+                        "message": "Background removed successfully"
+                    })
+
             finally:
-                # Clean up temporary files
                 if os.path.exists(input_path):
                     os.remove(input_path)
-                if os.path.exists(result_path):
+                if response_type != 'url' and os.path.exists(result_path):
                     os.remove(result_path)
-        
-        except Exception as e:
-            return jsonify({"error": f"Invalid image data: {str(e)}"}), 400
-    
-    except Exception as e:
-        logger.error(f"Error processing base64 image: {e}")
-        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/models', methods=['GET'])
-def get_available_models():
-    """Get list of available AI models"""
-    models = [
-        {"id": "u2net", "name": "U²-Net", "description": "Good for most images (recommended)"},
-        {"id": "u2netp", "name": "U²-Net+", "description": "Lightweight version of U²-Net (fastest)"},
-        {"id": "u2net_human_seg", "name": "U²-Net Human Segmentation", "description": "Optimized for human subjects"},
-        {"id": "u2net_cloth_seg", "name": "U²-Net Cloth Segmentation", "description": "Optimized for clothing"},
-        {"id": "silueta", "name": "Silueta", "description": "Good for portraits and people"}
-    ]
-    return jsonify({"models": models})
-
-@app.route('/api/features', methods=['GET'])
-def get_available_features():
-    """Get list of available features"""
-    features = [
-        {"id": "auto_crop", "name": "Auto Crop", "description": "Automatically crop to remove empty space"},
-        {"id": "white_bg", "name": "White Background", "description": "Add white background instead of transparent"},
-        {"id": "enhance", "name": "Image Enhancement", "description": "Enhance image quality with contrast and sharpness"},
-        {"id": "padding", "name": "Padding", "description": "Add padding around the cropped subject"}
-    ]
-    return jsonify({"features": features})
-
-@app.route('/api/remove-background-url', methods=['POST'])
-def remove_background_from_url():
-    """Remove background from an image available at a public URL.
-
-    JSON payload:
-      - image_url: str (required)
-      - model: str (optional, default 'u2net')
-      - padding: int (optional, default 10)
-      - white_bg: bool (optional, default false)
-      - enhance: bool (optional, default false)
-      - response_type: 'base64' | 'url' (optional, default 'base64')
-    """
-    try:
-        data = request.get_json() or {}
-        image_url = data.get('image_url')
-        if not image_url:
-            return jsonify({"error": "image_url is required"}), 400
-
-        model = data.get('model', 'u2net')
-        padding = int(data.get('padding', 10))
-        white_bg = bool(data.get('white_bg', False))
-        enhance = bool(data.get('enhance', False))
-        response_type = data.get('response_type', 'base64')
-
-        if not bg_remover:
-            return jsonify({"error": "Background remover not available"}), 500
-
-        # Download the image
-        try:
-            r = requests.get(image_url, timeout=20)
-            r.raise_for_status()
-        except Exception as e:
-            return jsonify({"error": f"Failed to download image: {str(e)}"}), 400
-
-        # Save to temp file
-        temp_name = f"temp_url_{uuid.uuid4().hex}.png"
-        input_path = temp_name
-        with open(input_path, 'wb') as f:
-            f.write(r.content)
-
-        try:
-            if white_bg:
-                result_path = bg_remover.remove_background_with_white_bg(
-                    input_path,
-                    auto_crop=True,
-                    padding=padding
-                )
-            else:
-                result_path = bg_remover.remove_background(
-                    input_path,
-                    auto_crop=True,
-                    padding=padding
-                )
-
-            if enhance:
-                bg_remover.enhance_image(result_path)
-
-            return _respond_with_file(result_path, response_type)
-
-        finally:
-            if os.path.exists(input_path):
-                os.remove(input_path)
-            # _respond_with_file may have already moved the result; ignore errors
-            try:
-                if os.path.exists(result_path):
-                    os.remove(result_path)
-            except Exception:
-                pass
+        except requests.exceptions.RequestException as req_e:
+            return jsonify({"error": f"Failed to download image: {str(req_e)}"}), 400
+        except Exception as img_e:
+            return jsonify({"error": f"Invalid image: {str(img_e)}"}), 400
 
     except Exception as e:
-        logger.error(f"Error processing image URL: {e}")
+        logger.error(f"Error processing URL image: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/batch-remove', methods=['POST'])
-def batch_remove_background():
-    """API endpoint for batch background removal"""
-    try:
-        if 'files' not in request.files:
-            return jsonify({"error": "No files provided"}), 400
-        
-        files = request.files.getlist('files')
-        if not files or all(f.filename == '' for f in files):
-            return jsonify({"error": "No files selected"}), 400
-        
-        if not bg_remover:
-            return jsonify({"error": "Background remover not available"}), 500
-        
-        # Get parameters
-        model = request.form.get('model', 'u2net')
-        padding = int(request.form.get('padding', '10'))
-        white_bg = request.form.get('white_bg', 'false').lower() == 'true'
-        enhance = request.form.get('enhance', 'false').lower() == 'true'
-        
-        # Process all files
-        results = []
-        temp_files = []
-        
-        try:
-            for file in files:
-                if file.filename and allowed_file(file.filename):
-                    filename = secure_filename(file.filename)
-                    input_path = f"temp_{filename}"
-                    file.save(input_path)
-                    temp_files.append(input_path)
-                    
-                    # Process image
-                    if white_bg:
-                        result_path = bg_remover.remove_background_with_white_bg(
-                            input_path,
-                            auto_crop=True,
-                            padding=padding
-                        )
-                    else:
-                        result_path = bg_remover.remove_background(
-                            input_path,
-                            auto_crop=True,
-                            padding=padding
-                        )
-                    
-                    # Enhance image if requested
-                    if enhance:
-                        bg_remover.enhance_image(result_path)
-                    
-                    results.append({
-                        'original': filename,
-                        'processed': result_path
-                    })
-            
-            # Create zip file with all results
-            import zipfile
-            zip_path = "batch_results.zip"
-            with zipfile.ZipFile(zip_path, 'w') as zipf:
-                for result in results:
-                    zipf.write(result['processed'], f"processed_{result['original']}")
-            
-            return send_file(zip_path, as_attachment=True, download_name="batch_results.zip")
-            
-        finally:
-            # Clean up temporary files
-            for temp_file in temp_files:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-            for result in results:
-                if os.path.exists(result['processed']):
-                    os.remove(result['processed'])
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-    
-    except Exception as e:
-        logger.error(f"Error in batch processing: {e}")
-        return jsonify({"error": str(e)}), 500
+@app.route('/files/<filename>')
+def serve_file(filename):
+    """Serves processed files"""
+    return send_from_directory('files', filename)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

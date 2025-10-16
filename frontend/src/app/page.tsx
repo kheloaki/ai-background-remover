@@ -138,11 +138,7 @@ export default function BackgroundRemoverNextUI() {
               <Badge variant="secondary" className="ml-2">Beta</Badge>
             </div>
             <div className="flex items-center gap-2">
-              <Button 
-                size="sm" 
-                className="gap-2"
-                onClick={() => window.open('https://github.com/kheloaki/ai-background-remover/blob/main/API_DOCUMENTATION.md', '_blank')}
-              >
+              <Button size="sm" className="gap-2">
                 <GitBranch className="h-4 w-4" /> API Docs
               </Button>
             </div>
