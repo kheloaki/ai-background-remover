@@ -11,6 +11,7 @@ from flask import Flask, request, jsonify, render_template, send_file, send_from
 from werkzeug.utils import secure_filename
 import logging
 from background_remover_light import LightweightBackgroundRemover
+from flask_cors import CORS
 import uuid
 import requests
 
@@ -19,6 +20,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# Allow CORS for frontend domains; during dev allow all
+CORS(app, resources={r"/api/*": {"origins": "*"}, r"/files/*": {"origins": "*"}})
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 OUTPUT_DIR = os.path.join(os.getcwd(), "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
