@@ -1,24 +1,32 @@
-Dockerfile
-.dockerignore
+# Dependencies
 node_modules
 npm-debug.log
-README.md
+
+# Environment files
 .env
 .env.local
 .env.production.local
-.env.local
+
+# Build artifacts
 .next
+out
+
+# Version control
 .git
 .gitignore
-*.py
+
+# Python cache
 *.pyc
 __pycache__/
-templates/
-static/
-background_remover.py
-background_remover_light.py
-app.py
-requirements.txt
+
+# Test files
+test_*.py
+
+# Documentation
+README.md
+API_DOCUMENTATION.md
+
+# Old deployment configs
 Procfile
 render.yaml
 runtime.txt
