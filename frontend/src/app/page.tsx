@@ -119,6 +119,17 @@ export default function BackgroundRemoverNextUI() {
 
   const clearItem = (id: string) => setItems((prev) => prev.filter((p) => p.id !== id));
 
+  const downloadImage = (item: ImageItem) => {
+    if (item.status !== 'done' || !item.result) return;
+    
+    const link = document.createElement('a');
+    link.href = item.result;
+    link.download = `removed_bg_${item.file.name}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const processedCount = useMemo(() => items.filter((i) => i.status === "done").length, [items]);
 
   return (
@@ -246,7 +257,7 @@ export default function BackgroundRemoverNextUI() {
                                   </Tooltip>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      <Button variant="ghost" size="icon" disabled={it.status !== "done"}>
+                                      <Button variant="ghost" size="icon" disabled={it.status !== "done"} onClick={() => downloadImage(it)}>
                                         <Download className="h-4 w-4" />
                                       </Button>
                                     </TooltipTrigger>
